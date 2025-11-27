@@ -27,7 +27,7 @@ const LavaLamp: React.FC = () => {
     color: 'red',
     size: 0.5, 
     speed: 1,
-    splashOpacity: 0.9, 
+    splashOpacity: 0.5, 
     isLocked: false,
     isOn: true,
     isMinimized: false,
@@ -41,15 +41,15 @@ const LavaLamp: React.FC = () => {
     const init = async () => {
       try {
         const savedConfig = await loadConfig();
-        if (savedConfig) setConfig(prev => ({ ...prev, ...savedConfig }));
-        
+        if (savedConfig) {
+            if (savedConfig.splashOpacity === 0.9) savedConfig.splashOpacity = 0.5;
+            setConfig(prev => ({ ...prev, ...savedConfig }));
+        }
         // @ts-ignore
         if (typeof chrome !== 'undefined' && chrome.storage) {
           // @ts-ignore
           chrome.storage.local.get(['lampPosition'], (res) => { 
-              if (res.lampPosition && !isNaN(res.lampPosition.x)) {
-                  setPosition(res.lampPosition);
-              }
+              if (res.lampPosition && !isNaN(res.lampPosition.x)) setPosition(res.lampPosition);
               setHasLoaded(true);
           });
         } else {
@@ -105,7 +105,6 @@ const LavaLamp: React.FC = () => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const clickY = e.clientY - rect.top;
     const height = rect.height;
-    // 防止除以0
     const ratio = height > 0 ? Math.min(Math.max(clickY / height, 0), 1) : 0.5;
 
     dragRef.current = {
@@ -145,10 +144,8 @@ const LavaLamp: React.FC = () => {
     const velocity = e.movementX; 
     const leverage = (0.5 - dragRef.current.grabRatio) * 4.0;
     const targetRotation = velocity * leverage; 
-    
     const maxTilt = 12;
     const clampedRotation = Math.max(-maxTilt, Math.min(maxTilt, targetRotation));
-    
     setRotation(clampedRotation);
   };
 
@@ -168,17 +165,23 @@ const LavaLamp: React.FC = () => {
   // --- 视觉逻辑 ---
   useEffect(() => {
     const newBlobs: BlobConfig[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 8; i++) {
+      let sizeBase = 0;
+      if (i >= 4 && i <= 5) {
+          sizeBase = 26 + Math.random() * 8; 
+      } else {
+          sizeBase = 14 + Math.random() * 10; 
+      }
       newBlobs.push({
         id: i,
         x: 35 + Math.random() * 30, 
-        size: 10 + Math.random() * 18, 
-        duration: 8 + Math.random() * 15, 
-        delay: Math.random() * 20,
-        opacity: 0.9 + Math.random() * 0.1
+        size: sizeBase, 
+        duration: 12 + Math.random() * 8, 
+        delay: Math.random() * 20, 
+        opacity: 1
       });
     }
-    newBlobs.push({ id: 99, x: 50, size: 50, duration: 6, delay: 0, opacity: 1 });
+    newBlobs.push({ id: 99, x: 50, size: 0, duration: 0, delay: 0, opacity: 0 });
     setBlobs(newBlobs);
   }, []);
 
@@ -187,20 +190,31 @@ const LavaLamp: React.FC = () => {
   const currentMetal = isDark ? METAL_THEMES.dark : METAL_THEMES.light;
   const isRainbow = config.color === 'rainbow';
 
+  const liqOpTop = config.splashOpacity * 0.3;
+  const liqOpBot = config.splashOpacity * 0.6;
+
+  // 黄金熔岩配色
+  const HOT_PALETTE = {
+    red: { hot: '#fee891', mid: '#fe9d03', cold: '#fb923c', glow: '#ffcf22' },
+    blue: { hot: '#e0f2fe', mid: '#3b82f6', cold: '#60a5fa', glow: '#93c5fd' },
+    green: { hot: '#dcfce7', mid: '#22c55e', cold: '#4ade80', glow: '#86efac' },
+    purple: { hot: '#fae8ff', mid: '#a855f7', cold: '#c084fc', glow: '#d8b4fe' },
+  };
+  
+  const activeColor = HOT_PALETTE[config.color as keyof typeof HOT_PALETTE] || HOT_PALETTE.red;
+
   const splashStyle = isRainbow ? {
      background: `radial-gradient(circle, #ffb3ba 0%, #ffdfba 40%, transparent 70%)`,
      filter: 'blur(40px)',
      animation: 'hueRotate 10s linear infinite', 
      opacity: 0.3 
   } : {
-     background: `radial-gradient(circle, ${currentPalette.liquidBottom}CC 0%, ${currentPalette.liquidTop}33 50%, transparent 70%)`,
+     background: `radial-gradient(circle, ${activeColor.mid}CC 0%, ${activeColor.mid}33 50%, transparent 70%)`,
      filter: 'blur(40px)',
      opacity: 0.6 
   };
 
-  const effectiveBodyOpacity = 0.325 + (config.splashOpacity * 0.75);
-
-  // --- 几何参数 ---
+  // 几何参数
   const VIEWBOX_WIDTH = 240; const VIEWBOX_HEIGHT = 600; const CENTER_X = 120;
   const CAP_TOP_W = 60; const CAP_BOT_W = 80; const BASE_TOP_W = 140; const BASE_WAIST_W = 80; const BASE_FLOOR_W = 140;
   const UNIT = 35; const GLASS_H = 7 * UNIT; const CAP_H = 2 * UNIT; const BASE_H = 5 * UNIT;
@@ -254,10 +268,7 @@ const LavaLamp: React.FC = () => {
         </div>
       )}
 
-      {/* 核心容器 */}
       <div 
-        // 🔥 修复关键：移除了这里的 pointer-events-auto
-        // 这样这个大容器本身是“透明”的，鼠标点上去会穿透
         className="absolute"
         style={{
           left: position.x,
@@ -267,15 +278,11 @@ const LavaLamp: React.FC = () => {
           transition: (isReady && !dragRef.current.isDragging) ? 'transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1.2), opacity 0.5s' : 'none',
           opacity: isReady ? 1 : 0
         }}
-        // 这里保留 onMouseDown，因为事件冒泡机制
-        // 当你点击子元素（火焰）时，事件会冒泡上来被这里捕获，开始拖动
         onMouseDown={handleMouseDown}
       >
         
-        {/* Minimized State (Ignition Game) */}
         {config.isMinimized ? (
           <div 
-            // 🔥 显式声明父容器不响应鼠标
             className="flex items-end justify-center pointer-events-none"
             style={{
               width: `${VIEWBOX_WIDTH}px`,
@@ -285,7 +292,6 @@ const LavaLamp: React.FC = () => {
               transformOrigin: 'bottom center'
             }}
           >
-            {/* 🔥 只有这一个子元素是可点击、可拖动的 */}
             <div 
               className={`pointer-events-auto ${config.isLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
             >
@@ -293,7 +299,6 @@ const LavaLamp: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Normal State (Lamp) */
           <div 
             className={`relative pointer-events-auto ${config.isLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
           >
@@ -312,7 +317,7 @@ const LavaLamp: React.FC = () => {
                 xmlns="http://www.w3.org/2000/svg"
               >
                 <defs>
-                  <filter id="goo"><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" /><feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9" result="goo" /><feComposite in="SourceGraphic" in2="goo" operator="atop"/></filter>
+                  <filter id="goo"><feGaussianBlur in="SourceGraphic" stdDeviation="13" result="blur" /><feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" /><feComposite in="SourceGraphic" in2="goo" operator="atop"/></filter>
                   
                   <linearGradient id="metalGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                     <stop offset="0%" stopColor={isDark ? '#0f172a' : '#3f3f46'} />
@@ -326,24 +331,38 @@ const LavaLamp: React.FC = () => {
                   
                   {isRainbow ? (
                     <>
+                       <radialGradient id="rainbowGlow" cx="50%" cy="100%" r="80%">
+                          <stop offset="0%" stopColor="#ffb3ba" stopOpacity="0.9"><animate attributeName="stop-color" values="#ffb3ba;#ffffba;#baffc9;#bae1ff;#eecbff;#ffb3ba" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop><stop offset="100%" stopColor="#ffdfba" stopOpacity="0"><animate attributeName="stop-color" values="#ffdfba;#ffffba;#baffc9;#bae1ff;#eecbff;#ffb3ba;#ffdfba" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
+                       </radialGradient>
                        <linearGradient id="liquidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <stop offset="0%" stopColor="#ffb3ba"><animate attributeName="stop-color" values="#ffb3ba;#ffffba;#baffc9;#bae1ff;#eecbff;#ffb3ba" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
-                          <stop offset="100%" stopColor="#ffdfba"><animate attributeName="stop-color" values="#ffdfba;#ffffba;#baffc9;#bae1ff;#eecbff;#ffb3ba;#ffdfba" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
+                          <stop offset="0%" stopColor="#ffb3ba" stopOpacity={liqOpTop}><animate attributeName="stop-color" values="#ffb3ba;#ffffba;#baffc9;#bae1ff;#eecbff;#ffb3ba" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop><stop offset="100%" stopColor="#ffdfba" stopOpacity={liqOpBot}><animate attributeName="stop-color" values="#ffdfba;#ffffba;#baffc9;#bae1ff;#eecbff;#ffb3ba;#ffdfba" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
                        </linearGradient>
+
+                       {/* 🔥 修复：彩虹蜡块现在也是 "底部白热" 模式
+                           Top (0%): Vivid color
+                           Mid (60%): Vivid color
+                           Bot (100%): White (High brightness)
+                       */}
                        <linearGradient id="waxGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <stop offset="0%" stopColor="#ff0000"><animate attributeName="stop-color" values="#ff0000;#ffff00;#00ff00;#00ffff;#0000ff;#ff00ff;#ff0000" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
-                          <stop offset="100%" stopColor="#cc0000"><animate attributeName="stop-color" values="#cc0000;#cccc00;#00cc00;#00cccc;#0000cc;#cc00cc;#cc0000" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
+                          <stop offset="0%" stopColor="#ff0000" stopOpacity="0.9"><animate attributeName="stop-color" values="#ff0000;#ffff00;#00ff00;#00ffff;#0000ff;#ff00ff;#ff0000" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
+                          <stop offset="60%" stopColor="#ff0000" stopOpacity="0.9"><animate attributeName="stop-color" values="#ff0000;#ffff00;#00ff00;#00ffff;#0000ff;#ff00ff;#ff0000" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
+                          <stop offset="100%" stopColor="#ffffff" stopOpacity="0.9"><animate attributeName="stop-color" values="#ffffff;#ffffff;#ffffff;#ffffff;#ffffff;#ffffff;#ffffff" dur="10s" repeatCount="indefinite" calcMode="linear" /></stop>
                        </linearGradient>
                     </>
                   ) : (
                     <>
+                      <radialGradient id="bottomGlow" cx="50%" cy="100%" r="80%">
+                         <stop offset="0%" stopColor={activeColor.hot} stopOpacity="0.9" className="transition-colors duration-500" /><stop offset="100%" stopColor={activeColor.hot} stopOpacity="0" className="transition-colors duration-500" />
+                      </radialGradient>
                       <linearGradient id="liquidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor={currentPalette.liquidTop} stopOpacity="0.9" className="transition-colors duration-500" />
-                        <stop offset="100%" stopColor={currentPalette.liquidBottom} stopOpacity="0.95" className="transition-colors duration-500" />
+                        <stop offset="0%" stopColor={activeColor.hot} stopOpacity={liqOpTop} className="transition-colors duration-500" /><stop offset="100%" stopColor={activeColor.mid} stopOpacity={liqOpBot} className="transition-colors duration-500" />
                       </linearGradient>
+                      
+                      {/* 普通模式：Top(Deep) -> Mid(Color) -> Bot(Bright) */}
                       <linearGradient id="waxGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor={currentPalette.waxTop} className="transition-colors duration-500" />
-                        <stop offset="100%" stopColor={currentPalette.waxBottom} className="transition-colors duration-500" />
+                        <stop offset="0%" stopColor={activeColor.cold} stopOpacity="0.9" className="transition-colors duration-500" />
+                        <stop offset="60%" stopColor={activeColor.mid} stopOpacity="0.9" className="transition-colors duration-500" />
+                        <stop offset="100%" stopColor={activeColor.hot} stopOpacity="0.9" className="transition-colors duration-500" />
                       </linearGradient>
                     </>
                   )}
@@ -353,33 +372,30 @@ const LavaLamp: React.FC = () => {
                 </defs>
 
                 <path d={CAP_PATH} fill="url(#metalGradient)" stroke="rgba(0,0,0,0.4)" strokeWidth="1" />
-                
                 <path d={CAP_HL_MAIN} fill="white" fillOpacity="0.2" filter="blur(1px)" />
                 <path d={CAP_HL_RIM} fill="white" fillOpacity="0.15" filter="blur(0.5px)" />
                 
-                <g clipPath="url(#bottleClip)" style={{ opacity: effectiveBodyOpacity }}>
+                <g clipPath="url(#bottleClip)">
                   <rect x="0" y="0" width={VIEWBOX_WIDTH} height={VIEWBOX_HEIGHT} fill="url(#liquidGradient)" className={`transition-opacity duration-1000 ${config.isOn ? 'opacity-100' : 'opacity-30'}`} />
+                  
+                  {config.isOn && <ellipse cx={CENTER_X} cy={420} rx={100} ry={90} fill={isRainbow ? "url(#rainbowGlow)" : "url(#bottomGlow)"} filter="blur(25px)" opacity="0.9" />}
+                  {config.isOn && <ellipse cx={CENTER_X} cy={120} rx={60} ry={30} fill={isRainbow ? "url(#rainbowGlow)" : "url(#bottomGlow)"} filter="blur(20px)" opacity="0.5" />}
+
                   {config.isOn && (
                     <g filter="url(#goo)" className="opacity-90" style={{ transform: `rotate(${-rotation * 0.7}deg)`, transformOrigin: 'center' }}>
+                      <ellipse cx={CENTER_X} cy={115} rx={40} ry={10} fill="url(#waxGradient)" />
+                      <ellipse cx={CENTER_X} cy={365} rx={65} ry={25} fill="url(#waxGradient)" />
                       {blobs.map((blob) => <LavaLampBlob key={blob.id} config={blob} containerHeight={VIEWBOX_HEIGHT} speed={config.speed} />)}
                     </g>
                   )}
-                  <path d={GLASS_PATH} fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="4" />
+                  {/* 🔥 修复：彩虹描边应用高亮动画 */}
+                  <path d={GLASS_PATH} fill="none" stroke={isRainbow ? '#ffb3ba' : activeColor.glow} strokeWidth="4" strokeOpacity="0.8" filter="blur(2px)">
+                      {isRainbow && <animate attributeName="stroke" values="#ffb3ba;#ffffba;#baffc9;#bae1ff;#eecbff;#ffb3ba" dur="10s" repeatCount="indefinite" calcMode="linear" />}
+                  </path>
                 </g>
-                
-                <g clipPath="url(#bottleClip)" className="pointer-events-none">
-                  <rect x="0" y="0" width={VIEWBOX_WIDTH} height={VIEWBOX_HEIGHT} fill="url(#glassGlare)" />
-                  <path d={`M ${capBotL+8},${CAP_BOT_Y+10} L ${capBotL + (intL.x - capBotL) * 0.9 + 8},${CAP_BOT_Y + (intL.y - CAP_BOT_Y) * 0.9}`} stroke="white" strokeWidth="3" strokeOpacity="0.3" fill="none" strokeLinecap="round" />
-                  <path d={`M ${capBotR-10},${CAP_BOT_Y+10} L ${capBotR + (intR.x - capBotR) * 0.9 - 10},${CAP_BOT_Y + (intR.y - CAP_BOT_Y) * 0.9}`} stroke="white" strokeWidth="2" strokeOpacity="0.15" fill="none" strokeLinecap="round" />
-                </g>
-
-                <path d={BASE_CUP_PATH} fill="url(#metalGradient)" stroke="rgba(0,0,0,0.4)" strokeWidth="1" />
-                <path d={BASE_CUP_HL_MAIN} fill="white" fillOpacity="0.2" filter="blur(1px)" />
-                <path d={BASE_CUP_HL_RIM} fill="white" fillOpacity="0.15" filter="blur(0.5px)" />
-                
-                <path d={BASE_CONE_PATH} fill="url(#metalGradient)" stroke="rgba(0,0,0,0.4)" strokeWidth="1" />
-                <path d={BASE_CONE_HL_MAIN} fill="white" fillOpacity="0.2" filter="blur(1px)" />
-                <path d={BASE_CONE_HL_RIM} fill="white" fillOpacity="0.15" filter="blur(0.5px)" />
+                <g clipPath="url(#bottleClip)" className="pointer-events-none"><rect x="0" y="0" width={VIEWBOX_WIDTH} height={VIEWBOX_HEIGHT} fill="url(#glassGlare)" /><path d={`M ${capBotL+8},${CAP_BOT_Y+10} L ${capBotL + (intL.x - capBotL) * 0.9 + 8},${CAP_BOT_Y + (intL.y - CAP_BOT_Y) * 0.9}`} stroke="white" strokeWidth="3" strokeOpacity="0.3" fill="none" strokeLinecap="round" /><path d={`M ${capBotR-10},${CAP_BOT_Y+10} L ${capBotR + (intR.x - capBotR) * 0.9 - 10},${CAP_BOT_Y + (intR.y - CAP_BOT_Y) * 0.9}`} stroke="white" strokeWidth="2" strokeOpacity="0.15" fill="none" strokeLinecap="round" /></g>
+                <path d={BASE_CUP_PATH} fill="url(#metalGradient)" stroke="rgba(0,0,0,0.4)" strokeWidth="1" /><path d={BASE_CUP_HL_MAIN} fill="white" fillOpacity="0.2" filter="blur(1px)" /><path d={BASE_CUP_HL_RIM} fill="white" fillOpacity="0.15" filter="blur(0.5px)" />
+                <path d={BASE_CONE_PATH} fill="url(#metalGradient)" stroke="rgba(0,0,0,0.4)" strokeWidth="1" /><path d={BASE_CONE_HL_MAIN} fill="white" fillOpacity="0.2" filter="blur(1px)" /><path d={BASE_CONE_HL_RIM} fill="white" fillOpacity="0.15" filter="blur(0.5px)" />
               </svg>
             </div>
           </div>

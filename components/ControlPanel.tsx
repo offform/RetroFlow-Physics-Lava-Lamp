@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { LampConfig, LampColor, LampTheme, COLOR_PALETTES, getBrowserLanguage, TRANSLATIONS } from '../types';
 
@@ -10,8 +9,6 @@ interface ControlPanelProps {
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMinimize, onClose }) => {
-  // State is used ONLY for the resting position to persist across re-renders.
-  // Intermediate dragging frames are handled via direct DOM manipulation.
   const [position, setPosition] = useState<{x: number, y: number} | null>(null);
   
   const dragRef = useRef<{ 
@@ -30,13 +27,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
   const lang = useMemo(() => getBrowserLanguage(), []);
   const t = TRANSLATIONS[lang];
 
-  // --- DRAGGING LOGIC (Optimized) ---
+  // --- DRAGGING LOGIC ---
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!panelRef.current) return;
     
     const rect = panelRef.current.getBoundingClientRect();
-    
-    // We grab the current visual coordinates directly from the DOM
     const currentLeft = rect.left;
     const currentTop = rect.top;
 
@@ -46,8 +41,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
     dragRef.current.initialLeft = currentLeft;
     dragRef.current.initialTop = currentTop;
     
-    // If this is the first drag (moving from CSS right-aligned to absolute), 
-    // set the initial state so React knows where it is conceptually.
     if (!position) {
         setPosition({ x: currentLeft, y: currentTop });
     }
@@ -59,16 +52,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
   const handleMouseMove = (e: MouseEvent) => {
     if (!dragRef.current.isDragging || !panelRef.current) return;
     
-    // Calculate delta
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
     
     const newX = dragRef.current.initialLeft + dx;
     const newY = dragRef.current.initialTop + dy;
 
-    // --- CRITICAL OPTIMIZATION ---
-    // Update the DOM style directly. This avoids triggering a React render 
-    // and recalculating the component tree (and the expensive blur filter) on every pixel.
     panelRef.current.style.left = `${newX}px`;
     panelRef.current.style.top = `${newY}px`;
     panelRef.current.style.right = 'auto'; 
@@ -81,7 +70,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
 
-    // Sync the final position back to React state only ONCE at the end.
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
     setPosition({
@@ -92,7 +80,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
 
   // --- THEMING LOGIC ---
   const isDark = config.theme === 'dark' || (config.theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const activeColor = config.color === 'rainbow' ? '#ec4899' : COLOR_PALETTES[config.color].waxTop; 
+  
+  // 这里的 activeColor 用于标题和滑块颜色
+  // 如果是 red 模式，现在对应的是金色
+  const activeColor = config.color === 'rainbow' ? '#ec4899' : 
+                      config.color === 'red' ? '#fe9d03' : // 🔥 红色模式现在UI显示为金色
+                      COLOR_PALETTES[config.color].waxTop; 
 
   const themes: { id: LampTheme; label: string }[] = [
     { id: 'light', label: t.themeLight },
@@ -101,18 +94,18 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
   ];
 
   const colors: { id: LampColor; color: string; isRainbow?: boolean }[] = [
-    { id: 'red', color: '#f43f5e' },
+    // 🔥 核心修改：这里的 ID 依然是 'red' (对应底层逻辑)，但显示的颜色改为 '#fe9d03' (金色)
+    { id: 'red', color: '#fe9d03' }, 
     { id: 'blue', color: '#3b82f6' },
     { id: 'green', color: '#10b981' },
     { id: 'purple', color: '#a855f7' },
-    // Rainbow Option
     { id: 'rainbow', color: 'conic-gradient(from 180deg at 50% 50%, #FF0000 0deg, #FFFF00 60deg, #00FF00 120deg, #00FFFF 180deg, #0000FF 240deg, #FF00FF 300deg, #FF0000 360deg)', isRainbow: true },
   ];
 
   return (
     <div 
       ref={panelRef}
-      className={`fixed z-[9999] w-72 rounded-3xl shadow-2xl p-6 select-none
+      className={`menu-container fixed z-[9999] w-72 rounded-3xl shadow-2xl p-6 select-none
                  animate-in fade-in zoom-in duration-200 border transition-colors`}
       style={{
         left: position ? position.x : undefined,
@@ -166,18 +159,18 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
       <div className="mb-5">
         <label className={`block text-xs font-medium mb-2 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>{t.theme}</label>
         <div className={`grid grid-cols-3 gap-2 p-1 rounded-xl border ${isDark ? 'bg-black/20 border-white/5' : 'bg-white/40 border-neutral-200/50'}`}>
-          {themes.map((t) => (
+          {themes.map((th) => (
             <button
-              key={t.id}
-              onClick={() => updateConfig('theme', t.id)}
+              key={th.id}
+              onClick={() => updateConfig('theme', th.id)}
               className={`py-1.5 text-xs font-medium rounded-lg transition-all`}
               style={{
-                backgroundColor: config.theme === t.id ? (isDark ? 'rgba(255,255,255,0.15)' : 'white') : 'transparent',
-                color: config.theme === t.id ? (isDark ? 'white' : 'black') : (isDark ? '#737373' : '#6b7280'),
-                boxShadow: config.theme === t.id ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                backgroundColor: config.theme === th.id ? (isDark ? 'rgba(255,255,255,0.15)' : 'white') : 'transparent',
+                color: config.theme === th.id ? (isDark ? 'white' : 'black') : (isDark ? '#737373' : '#6b7280'),
+                boxShadow: config.theme === th.id ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
               }}
             >
-              {t.label}
+              {th.label}
             </button>
           ))}
         </div>
@@ -253,12 +246,13 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ config, updateConfig, onMin
       <div className="mb-5">
         <div className={`flex justify-between text-xs font-medium mb-2 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
           <span>{t.opacity}</span>
+          {/* 显示为 0-100% */}
           <span>{Math.round(config.splashOpacity * 100)}%</span>
         </div>
         <input 
           type="range" 
-          min="0.1" 
-          max="0.9" 
+          min="0.0" 
+          max="1.0" 
           step="0.1"
           value={config.splashOpacity}
           onChange={(e) => updateConfig('splashOpacity', parseFloat(e.target.value))}
